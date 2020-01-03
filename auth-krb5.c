@@ -181,9 +181,14 @@ auth_krb5_password(Authctxt *authctxt, const char *password)
 	authctxt->krb5_ticket_file = (char *)krb5_cc_get_name(authctxt->krb5_ctx, authctxt->krb5_fwd_ccache);
 
 	len = strlen(authctxt->krb5_ticket_file) + 6;
-	authctxt->krb5_ccname = xmalloc(len);
+#ifdef USE_CCAPI
+	snprintf(authctxt->krb5_ccname, len, "API:%s",
+                 authctxt->krb5_ticket_file);
+#else
+        authctxt->krb5_ccname = xmalloc(len);
 	snprintf(authctxt->krb5_ccname, len, "FILE:%s",
-	    authctxt->krb5_ticket_file);
+                 authctxt->krb5_ticket_file);
+#endif
 
 #ifdef USE_PAM
 	if (options.use_pam)
@@ -240,16 +245,23 @@ krb5_cleanup_proc(Authctxt *authctxt)
 #ifndef HEIMDAL
 krb5_error_code
 ssh_krb5_cc_gen(krb5_context ctx, krb5_ccache *ccache) {
-	int tmpfd, ret, oerrno;
+	int ret, oerrno;
 	char ccname[40];
 	mode_t old_umask;
+#ifdef USE_CCAPI
+	char cctemplate[] = "API:krb5cc_%d";
+#else
+	char cctemplate[] = "FILE:/tmp/krb5cc_%d_XXXXXXXXXX";
+	int tmpfd;
+#endif
 
 	ret = snprintf(ccname, sizeof(ccname),
-	    "FILE:/tmp/krb5cc_%d_XXXXXXXXXX", geteuid());
+                       cctemplate, geteuid());
 	if (ret < 0 || (size_t)ret >= sizeof(ccname))
 		return ENOMEM;
 
-	old_umask = umask(0177);
+#ifndef USE_CCAPI
+        old_umask = umask(0177);
 	tmpfd = mkstemp(ccname + strlen("FILE:"));
 	oerrno = errno;
 	umask(old_umask);
@@ -265,6 +277,7 @@ ssh_krb5_cc_gen(krb5_context ctx, krb5_ccache *ccache) {
 		return oerrno;
 	}
 	close(tmpfd);
+#endif
 
 	return (krb5_cc_resolve(ctx, ccname, ccache));
 }
